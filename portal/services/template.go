@@ -4,6 +4,7 @@ package services
 
 import (
 	"cloudiac/portal/consts/e"
+	"cloudiac/portal/libs/ctx"
 	"cloudiac/portal/libs/db"
 	"cloudiac/portal/models"
 	"fmt"
@@ -60,20 +61,28 @@ func GetTemplateById(tx *db.Session, id models.Id) (*models.Template, e.Error) {
 
 }
 
-func QueryTemplateByOrgId(tx *db.Session, q string, orgId models.Id, templateIdList []models.Id) *db.Session {
+func QueryTemplateByOrgId(tx *db.Session, q string, c *ctx.ServiceContext, templateIdList []models.Id) *db.Session {
 	query := tx.Model(&models.Template{}).Joins(
 		"LEFT  JOIN iac_user"+
 			"  ON iac_user.id = iac_template.creator_id").
 		LazySelectAppend(
 			"iac_user.name as creator",
 			"iac_template.*")
-	query = query.Joins("left join iac_env on iac_template.id = iac_env.tpl_id").Group("iac_template.id").
-		LazySelectAppend("count(iac_env.id) as relation_environment")
+	if c.ProjectId != "" {
+		query = query.Joins("left join iac_env on iac_template.id = iac_env.tpl_id and iac_env.project_id = ?", c.ProjectId).
+			Group("iac_template.id").
+			LazySelectAppend("count(iac_env.id) as relation_environment")
+	} else {
+		query = query.Joins("left join iac_env on iac_template.id = iac_env.tpl_id").
+			Group("iac_template.id").
+			LazySelectAppend("count(iac_env.id) as relation_environment")
+	}
 	if q != "" {
 		qs := "%" + q + "%"
 		query = query.Where("iac_template.name LIKE ? OR iac_template.description LIKE ?", qs, qs)
 	}
-	query = query.Where("iac_template.org_id = ?", orgId).Order("iac_template.created_at DESC")
+	query = query.Where("iac_template.org_id = ?", c.OrgId).Order("iac_template.created_at DESC")
+
 	if len(templateIdList) != 0 {
 		// 如果传入项目id，需要项目ID 再次筛选
 		query = query.Where("iac_template.id in (?) ", templateIdList)
